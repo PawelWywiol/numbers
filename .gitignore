@@ -17,3 +17,6 @@ wheels/
 
 # application files
 data
+
+# other
+.DS_Store
