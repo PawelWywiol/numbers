@@ -7,7 +7,7 @@ from typing import TypedDict
 import duckdb
 from dotenv import load_dotenv
 
-from processing.train import train_results
+from processing.train import predict_results, train_results
 
 load_dotenv()
 
@@ -203,3 +203,20 @@ def train_game_results(game_type: GameType) -> None:
     model_file = (DATA_DIR / f"{game_prefix}.pth").resolve()
 
     train_results(db_file, model_file)
+
+
+def predict_game_results(game_type: GameType) -> None:
+    if not isinstance(game_type, GameType):
+        msg = f"Expected GameMode, got {type(game_type).__name__}"
+        raise TypeError(msg)
+
+    game_config = GAMES_CONFIG.get(game_type)
+    if not game_config:
+        msg = f"Game {game_type.value} is not supported"
+        raise ValueError(msg)
+
+    game_prefix = game_config.get("prefix")
+    db_file = (DATA_DIR / f"{game_prefix}.duckdb").resolve()
+    model_file = (DATA_DIR / f"{game_prefix}.pth").resolve()
+
+    predict_results(db_file, model_file)

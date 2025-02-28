@@ -6,6 +6,7 @@ def main() -> None:
     game.resolve_results(game_type)
     game.preprocess_results(game_type)
     game.train_game_results(game_type)
+    game.predict_game_results(game_type)
 
 
 if __name__ == "__main__":

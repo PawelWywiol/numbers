@@ -99,6 +99,19 @@ def train_results(  # noqa: PLR0913
     torch.save(model.state_dict(), model_file)
     print(f"Model trained and saved as '{model_file}'")  # noqa: T201
 
+
+def predict_results(
+    db_file: str,
+    model_file: str,
+    hidden_dim: int = 128,
+) -> None:
+    results = load_data(db_file)
+    x, y = preprocess_data(results)
+
+    input_dim, output_dim = x.shape[1], y.shape[1]
+    model = MLP(input_dim, hidden_dim, output_dim)
+    model.load_state_dict(torch.load(model_file))
+
     last_x = x[-1].unsqueeze(0)
     next_draw = predict_next_draw(model, last_x)
     predicted_numbers = process_predictions(next_draw)
