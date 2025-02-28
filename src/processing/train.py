@@ -103,8 +103,10 @@ def train_results(  # noqa: PLR0913
 def predict_results(
     db_file: str,
     model_file: str,
+    approaches: int = 1,
+    distribution_size: int = 80,
     hidden_dim: int = 128,
-) -> None:
+) -> dict:
     results = load_data(db_file)
     x, y = preprocess_data(results)
 
@@ -112,9 +114,29 @@ def predict_results(
     model = MLP(input_dim, hidden_dim, output_dim)
     model.load_state_dict(torch.load(model_file))
 
-    last_x = x[-1].unsqueeze(0)
-    next_draw = predict_next_draw(model, last_x)
-    predicted_numbers = process_predictions(next_draw)
-    print(f"Predicted numbers for next draw: {predicted_numbers}")  # noqa: T201
+    distribution = [0] * distribution_size
 
-    print("Training completed")  # noqa: T201
+    for _ in range(approaches):
+        last_x = x[-1].unsqueeze(0)
+        next_draw = predict_next_draw(model, last_x)
+        predictions = process_predictions(next_draw)
+
+        for num in predictions:
+            distribution[num - 1] += 1
+
+        distribution_min = min(distribution)
+
+        if distribution_min > 0:
+            break
+
+    distribution_pairs = [(i + 1, distribution[i]) for i in range(distribution_size)]
+    distribution_pairs = [pair for pair in distribution_pairs if pair[1] > 0]
+    sorted_distribution = sorted(distribution_pairs, key=lambda x: x[1], reverse=True)
+
+    grouped_distribution = {}
+    for num, count in sorted_distribution:
+        if count not in grouped_distribution:
+            grouped_distribution[count] = []
+        grouped_distribution[count].append(num)
+
+    return grouped_distribution

@@ -219,4 +219,14 @@ def predict_game_results(game_type: GameType) -> None:
     db_file = (DATA_DIR / f"{game_prefix}.duckdb").resolve()
     model_file = (DATA_DIR / f"{game_prefix}.pth").resolve()
 
-    predict_results(db_file, model_file)
+    print("Predictions:")  # noqa: T201
+
+    predictions = predict_results(db_file, model_file)
+    for count, prediction in predictions.items():
+        print(f"{'x' + str(count):>4}: {prediction}")  # noqa: T201
+
+    print("\n")  # noqa: T201
+
+    predictions = predict_results(db_file, model_file, 100)
+    for count, prediction in predictions.items():
+        print(f"{'x' + str(count):>4}: {prediction}")  # noqa: T201
