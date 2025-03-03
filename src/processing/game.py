@@ -13,6 +13,7 @@ load_dotenv()
 
 
 class GameType(Enum):
+    Lotto = "Lotto"
     MultiMulti = "MultiMulti"
     Szybkie600 = "Szybkie600"
 
@@ -32,6 +33,11 @@ class GameConfig(TypedDict):
 
 
 GAMES_CONFIG: dict[GameType, GameConfig] = {
+    GameType.Lotto: {
+        "prefix": "Lotto",
+        "n": 6,
+        "k": 49,
+    },
     GameType.MultiMulti: {
         "prefix": "MultiMulti",
         "n": 20,
@@ -216,17 +222,19 @@ def predict_game_results(game_type: GameType) -> None:
         raise ValueError(msg)
 
     game_prefix = game_config.get("prefix")
+    n = game_config.get("n")
+    k = game_config.get("k")
     db_file = (DATA_DIR / f"{game_prefix}.duckdb").resolve()
     model_file = (DATA_DIR / f"{game_prefix}.pth").resolve()
 
     print("Predictions:")  # noqa: T201
 
-    predictions = predict_results(db_file, model_file)
+    predictions = predict_results(db_file, model_file, 1, n, k)
     for count, prediction in predictions.items():
         print(f"{'x' + str(count):>4}: {prediction}")  # noqa: T201
 
     print("\n")  # noqa: T201
 
-    predictions = predict_results(db_file, model_file, 100)
+    predictions = predict_results(db_file, model_file, 100, n, k)
     for count, prediction in predictions.items():
         print(f"{'x' + str(count):>4}: {prediction}")  # noqa: T201

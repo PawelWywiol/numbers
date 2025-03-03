@@ -52,19 +52,19 @@ def predict_next_draw(model: nn.Module, last_data: torch.Tensor) -> torch.Tensor
     return prediction.squeeze(0)
 
 
-def process_predictions(predictions: torch.Tensor, min_val: int = 1, max_val: int = 80, k: int = 20) -> list[int]:
+def process_predictions(predictions: torch.Tensor, n: int = 20, k: int = 80, min_val: int = 1) -> list[int]:
     """Process raw model predictions into valid lottery numbers."""
     rounded_predictions = torch.round(predictions).int().tolist()
     if isinstance(rounded_predictions, list):
         rounded_predictions = torch.tensor(rounded_predictions)
 
-    unique_numbers = list(set(min(max(int(n.item()), min_val), max_val) for n in rounded_predictions.flatten()))  # noqa: C401
+    unique_numbers = list(set(min(max(int(t.item()), min_val), k) for t in rounded_predictions.flatten()))  # noqa: C401
 
-    while len(unique_numbers) < k:
-        num = torch.randint(min_val, max_val + 1, (1,)).item()
+    while len(unique_numbers) < n:
+        num = torch.randint(min_val, k + 1, (1,)).item()
         if num not in unique_numbers:
             unique_numbers.append(num)
-    return sorted(unique_numbers[:k])
+    return sorted(unique_numbers[:n])
 
 
 def train_results(  # noqa: PLR0913
@@ -100,11 +100,12 @@ def train_results(  # noqa: PLR0913
     print(f"Model trained and saved as '{model_file}'")  # noqa: T201
 
 
-def predict_results(
+def predict_results(  # noqa: PLR0913
     db_file: str,
     model_file: str,
-    approaches: int = 1,
-    distribution_size: int = 80,
+    approaches: int,
+    n: int,
+    k: int,
     hidden_dim: int = 128,
 ) -> dict:
     results = load_data(db_file)
@@ -114,12 +115,12 @@ def predict_results(
     model = MLP(input_dim, hidden_dim, output_dim)
     model.load_state_dict(torch.load(model_file))
 
-    distribution = [0] * distribution_size
+    distribution = [0] * k
 
     for _ in range(approaches):
         last_x = x[-1].unsqueeze(0)
         next_draw = predict_next_draw(model, last_x)
-        predictions = process_predictions(next_draw)
+        predictions = process_predictions(next_draw, n, k)
 
         for num in predictions:
             distribution[num - 1] += 1
@@ -129,7 +130,7 @@ def predict_results(
         if distribution_min > 0:
             break
 
-    distribution_pairs = [(i + 1, distribution[i]) for i in range(distribution_size)]
+    distribution_pairs = [(i + 1, distribution[i]) for i in range(k)]
     distribution_pairs = [pair for pair in distribution_pairs if pair[1] > 0]
     sorted_distribution = sorted(distribution_pairs, key=lambda x: x[1], reverse=True)
 
