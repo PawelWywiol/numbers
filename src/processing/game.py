@@ -233,16 +233,8 @@ def predict_game_results(game_type: GameType, target: str) -> None:
     target_array = [int(i) for i in target] if target else []
     hits = 0
 
-    predictions = predict_results(db_file, model_file, 1, n, k)
-    for count, prediction in predictions.items():
-        if target_array:
-            hits = sum(1 for i in target_array if i in prediction)
-        print(f"{'x' + str(count):>4}: {prediction} :{hits}")  # noqa: T201
-
-    print("\n")  # noqa: T201
-
     predictions = predict_results(db_file, model_file, 100, n, k)
     for count, prediction in predictions.items():
         if target_array:
             hits = sum(1 for i in target_array if i in prediction)
-        print(f"{'x' + str(count):>4}: {prediction} :{hits}")  # noqa: T201
+        print(f"{'x' + str(count):>4}: {prediction}, {hits}/{len(prediction)}")  # noqa: T201

@@ -90,6 +90,7 @@ def train_results(  # noqa: PLR0913
 
     train_losses = []
     val_losses = []
+    avg_val_diff = []
 
     for epoch in range(epochs):
         model.train()
@@ -105,14 +106,21 @@ def train_results(  # noqa: PLR0913
         avg_train_loss = sum(batch_losses) / len(batch_losses)
         train_losses.append(avg_train_loss)
 
-        # Walidacja
         model.eval()
         with torch.no_grad():
             val_outputs = model(x)
             val_loss = criterion(val_outputs, y).item()
             val_losses.append(val_loss)
 
-        print(f"Epoch {epoch + 1}/{epochs}, Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}")  # noqa: T201
+        val_diff = train_losses[-1] - val_losses[-1]
+        avg_val_diff.append(val_diff)
+
+        avg_diff = sum(avg_val_diff) / max(len(avg_val_diff), 1)
+        avg_diff_percent = avg_diff / max(val_losses[-1], 1)
+
+        print(  # noqa: T201
+            f"Epoch {epoch + 1}/{epochs}, loss diff: {avg_diff:.6f} ({avg_diff_percent:.2%}), ",
+        )
 
     torch.save(model.state_dict(), model_file)
     print(f"Model trained and saved as '{model_file}'")  # noqa: T201
@@ -127,20 +135,6 @@ def train_results(  # noqa: PLR0913
     plt.title("Train vs Validation Loss")
     plt.savefig(plot_file)
     plt.close()
-
-    min_train_loss = 0.01
-
-    # Analiza i sugestie
-    if train_losses[-1] < min_train_loss:
-        print("🔹 Model może być przeuczony. Spróbuj zmniejszyć 'hidden_dim' lub liczbę epok.")  # noqa: T201
-    if train_losses[-1] > val_losses[-1]:
-        print("🔹 Możliwe przeuczenie. Spróbuj zmniejszyć 'epochs' lub 'hidden_dim'.")  # noqa: T201
-    if train_losses[-1] > 10 * val_losses[-1]:
-        print("🔹 Możliwe przeuczenie, duża różnica strat.")  # noqa: T201
-    if val_losses[-1] > train_losses[-1]:
-        print("🔹 Możliwe niedouczenie. Spróbuj zwiększyć 'epochs' lub zmniejszyć 'learning_rate'.")  # noqa: T201
-    if val_losses[-1] > train_losses[-1] * 2:
-        print("🔹 Model może się niedouczać. Spróbuj zmniejszyć 'batch_size' lub zwiększyć 'hidden_dim'.")  # noqa: T201
 
 
 def predict_results(  # noqa: PLR0913
