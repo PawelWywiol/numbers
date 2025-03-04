@@ -1,6 +1,7 @@
 import json
 
 import duckdb
+import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 from torch import nn, optim
@@ -70,6 +71,7 @@ def process_predictions(predictions: torch.Tensor, n: int = 20, k: int = 80, min
 def train_results(  # noqa: PLR0913
     db_file: str,
     model_file: str,
+    plot_file: str,
     hidden_dim: int = 128,
     epochs: int = 100,
     batch_size: int = 32,
@@ -86,18 +88,59 @@ def train_results(  # noqa: PLR0913
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+    train_losses = []
+    val_losses = []
+
     for epoch in range(epochs):
+        model.train()
+        batch_losses = []
         for batch_x, batch_y in dataloader:
             optimizer.zero_grad()
             outputs = model(batch_x)
             loss = criterion(outputs, batch_y)
             loss.backward()
             optimizer.step()
+            batch_losses.append(loss.item())
 
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.6f}")  # noqa: T201
+        avg_train_loss = sum(batch_losses) / len(batch_losses)
+        train_losses.append(avg_train_loss)
+
+        # Walidacja
+        model.eval()
+        with torch.no_grad():
+            val_outputs = model(x)
+            val_loss = criterion(val_outputs, y).item()
+            val_losses.append(val_loss)
+
+        print(f"Epoch {epoch + 1}/{epochs}, Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}")  # noqa: T201
 
     torch.save(model.state_dict(), model_file)
     print(f"Model trained and saved as '{model_file}'")  # noqa: T201
+
+    # Wykres strat
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, epochs + 1), train_losses, label="Train Loss")
+    plt.plot(range(1, epochs + 1), val_losses, label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Train vs Validation Loss")
+    plt.savefig(plot_file)
+    plt.close()
+
+    min_train_loss = 0.01
+
+    # Analiza i sugestie
+    if train_losses[-1] < min_train_loss:
+        print("🔹 Model może być przeuczony. Spróbuj zmniejszyć 'hidden_dim' lub liczbę epok.")  # noqa: T201
+    if train_losses[-1] > val_losses[-1]:
+        print("🔹 Możliwe przeuczenie. Spróbuj zmniejszyć 'epochs' lub 'hidden_dim'.")  # noqa: T201
+    if train_losses[-1] > 10 * val_losses[-1]:
+        print("🔹 Możliwe przeuczenie, duża różnica strat.")  # noqa: T201
+    if val_losses[-1] > train_losses[-1]:
+        print("🔹 Możliwe niedouczenie. Spróbuj zwiększyć 'epochs' lub zmniejszyć 'learning_rate'.")  # noqa: T201
+    if val_losses[-1] > train_losses[-1] * 2:
+        print("🔹 Model może się niedouczać. Spróbuj zmniejszyć 'batch_size' lub zwiększyć 'hidden_dim'.")  # noqa: T201
 
 
 def predict_results(  # noqa: PLR0913
@@ -124,11 +167,6 @@ def predict_results(  # noqa: PLR0913
 
         for num in predictions:
             distribution[num - 1] += 1
-
-        distribution_min = min(distribution)
-
-        if distribution_min > 0:
-            break
 
     distribution_pairs = [(i + 1, distribution[i]) for i in range(k)]
     distribution_pairs = [pair for pair in distribution_pairs if pair[1] > 0]

@@ -207,11 +207,12 @@ def train_game_results(game_type: GameType) -> None:
     game_prefix = game_config.get("prefix")
     db_file = (DATA_DIR / f"{game_prefix}.duckdb").resolve()
     model_file = (DATA_DIR / f"{game_prefix}.pth").resolve()
+    plot_file = (DATA_DIR / f"{game_prefix}.png").resolve()
 
-    train_results(db_file, model_file)
+    train_results(db_file, model_file, plot_file)
 
 
-def predict_game_results(game_type: GameType) -> None:
+def predict_game_results(game_type: GameType, target: str) -> None:
     if not isinstance(game_type, GameType):
         msg = f"Expected GameMode, got {type(game_type).__name__}"
         raise TypeError(msg)
@@ -229,12 +230,19 @@ def predict_game_results(game_type: GameType) -> None:
 
     print("Predictions:")  # noqa: T201
 
+    target_array = [int(i) for i in target] if target else []
+    hits = 0
+
     predictions = predict_results(db_file, model_file, 1, n, k)
     for count, prediction in predictions.items():
-        print(f"{'x' + str(count):>4}: {prediction}")  # noqa: T201
+        if target_array:
+            hits = sum(1 for i in target_array if i in prediction)
+        print(f"{'x' + str(count):>4}: {prediction} :{hits}")  # noqa: T201
 
     print("\n")  # noqa: T201
 
     predictions = predict_results(db_file, model_file, 100, n, k)
     for count, prediction in predictions.items():
-        print(f"{'x' + str(count):>4}: {prediction}")  # noqa: T201
+        if target_array:
+            hits = sum(1 for i in target_array if i in prediction)
+        print(f"{'x' + str(count):>4}: {prediction} :{hits}")  # noqa: T201
