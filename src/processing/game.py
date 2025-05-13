@@ -237,4 +237,6 @@ def predict_game_results(game_type: GameType, target: str) -> None:
     for count, prediction in predictions.items():
         if target_array:
             hits = sum(1 for i in target_array if i in prediction)
-        print(f"{'x' + str(count):>4}: {prediction}, {hits}/{len(prediction)}")  # noqa: T201
+            print(f"{'numbers predicted x' + str(count):>23}: {prediction} 🙈 target hits {hits} of {len(prediction)}")  # noqa: T201
+        else:
+            print(f"{'numbers predicted x' + str(count):>23}: {prediction}")  # noqa: T201

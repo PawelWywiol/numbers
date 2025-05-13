@@ -5,7 +5,7 @@ from processing import game
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Predict game results.")
-    parser.add_argument("--game", type=str, help="Game type (MultiMulti, Szybkie600).")
+    parser.add_argument("--game", type=str, help="Game type (Lotto, MultiMulti, Szybkie600).")
     parser.add_argument("--update", action="store_true", help="Update game results.")
     parser.add_argument("--train", action="store_true", help="Train the model.")
     parser.add_argument("--target", type=str, help="Target date for prediction (numbers separated by commas).")
