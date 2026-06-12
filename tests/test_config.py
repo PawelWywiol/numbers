@@ -2,12 +2,15 @@
 
 import pytest
 
-from processing.config import GAMES_CONFIG, GameType, game_file, get_game_config
+from processing.config import GAMES_CONFIG, GameType, _validate_bets, game_file, get_game_config
 
 
 def test_games_config_loaded() -> None:
     assert set(GAMES_CONFIG) == set(GameType)
-    assert GAMES_CONFIG[GameType.MultiMulti] == {"prefix": "MultiMulti", "n": 20, "k": 80}
+    multi = GAMES_CONFIG[GameType.MultiMulti]
+    assert multi["n"] == 20
+    assert multi["k"] == 80
+    assert multi["bets"] == {"count": 8, "size": 5}
 
 
 def test_get_game_config_valid() -> None:
@@ -34,3 +37,19 @@ def test_game_file_path() -> None:
     path = game_file(GameType.Szybkie600, "duckdb")
     assert path.name == "Szybkie600.duckdb"
     assert path.is_absolute()
+
+
+def test_validate_bets_missing() -> None:
+    with pytest.raises(ValueError, match="missing the 'bets' section"):
+        _validate_bets("X", {"prefix": "X", "n": 6, "k": 49})  # type: ignore[typeddict-item]
+
+
+def test_validate_bets_size_exceeds_k() -> None:
+    cfg = {"prefix": "X", "n": 6, "k": 49, "bets": {"count": 8, "size": 50}}
+    with pytest.raises(ValueError, match="size must be <= k"):
+        _validate_bets("X", cfg)  # type: ignore[arg-type]
+
+
+def test_validate_bets_valid() -> None:
+    cfg = {"prefix": "X", "n": 6, "k": 49, "bets": {"count": 8, "size": 6}}
+    _validate_bets("X", cfg)  # type: ignore[arg-type]  # does not raise

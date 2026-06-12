@@ -40,8 +40,9 @@ target-version = "py39"
 [lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
 select = ['ALL']
-# D: docstring rules; COM812: conflicts with the formatter (trailing-comma).
-ignore = ['D', 'COM812']
+# D: docstring rules; COM812: conflicts with the formatter (trailing-comma);
+# S311: non-crypto randomness is fine — bets/sampling are not security-sensitive.
+ignore = ['D', 'COM812', 'S311']
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]

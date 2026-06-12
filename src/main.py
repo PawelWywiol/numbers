@@ -17,6 +17,31 @@ def _add_game_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--game", type=str, default="MultiMulti", help="Game type (Lotto, MultiMulti, Szybkie600).")
 
 
+def _add_train_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--hidden-dims", type=str, default="256,128", help="Comma-separated layer sizes.")
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=10,
+        help="Early-stopping patience in epochs; 0 disables it (train all epochs, save final weights).",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=None,
+        help="L2 regularization for Adam (default: 1e-4, calibrated so val loss stays flat).",
+    )
+
+
+def _add_bet_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--bets-count", type=int, help="Override the number of bets from games.json.")
+    parser.add_argument("--bets-size", type=int, help="Override the bet size from games.json.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argparse parser with subcommands and backward-compatible legacy flags."""
     parser = argparse.ArgumentParser(description="Predict lottery game results.")
@@ -29,31 +54,54 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command")
 
-    p_update = sub.add_parser("update", help="Load JSON, preprocess, then train and predict.")
+    p_update = sub.add_parser("update", help="Load JSON, rebuild features, then train and predict.")
     _add_game_arg(p_update)
+    _add_train_args(p_update)
 
     p_train = sub.add_parser("train", help="Train the model, then predict.")
     _add_game_arg(p_train)
-    p_train.add_argument("--epochs", type=int, default=100)
-    p_train.add_argument("--lr", type=float, default=0.001)
-    p_train.add_argument("--hidden-dim", type=int, default=128)
-    p_train.add_argument("--batch-size", type=int, default=32)
+    _add_train_args(p_train)
 
-    p_predict = sub.add_parser("predict", help="Predict the next draw.")
+    p_predict = sub.add_parser("predict", help="Predict the next draw and generate bets.")
     _add_game_arg(p_predict)
     p_predict.add_argument("--target", type=str, help="Comma-separated numbers to score hits against.")
-    p_predict.add_argument("--approaches", type=int, default=DEFAULT_APPROACHES)
+    p_predict.add_argument("--seed", type=int, default=42, help="Seed for MC-dropout passes.")
+    p_predict.add_argument(
+        "--approaches",
+        type=int,
+        default=DEFAULT_APPROACHES,
+        help="MC-dropout forward passes for the grouped prediction view.",
+    )
+    _add_bet_args(p_predict)
 
-    p_eval = sub.add_parser("evaluate", help="Backtest prediction quality vs a random baseline.")
+    p_eval = sub.add_parser("evaluate", help="Backtest prediction quality vs random and frequency baselines.")
     _add_game_arg(p_eval)
     p_eval.add_argument("--last-n", type=int, default=20)
-    p_eval.add_argument("--retrain", action="store_true", help="True walk-forward: retrain per draw (slow).")
+    p_eval.add_argument("--retrain", action="store_true", help="True walk-forward: retrain per draw (slow, honest).")
+    p_eval.add_argument("--seed", type=int, default=42)
 
     return parser
 
 
 def _split_target(target: str | None) -> list[str] | None:
     return target.split(",") if target else None
+
+
+def _parse_hidden_dims(value: str) -> list[int]:
+    return [int(dim) for dim in value.split(",") if dim.strip()]
+
+
+def _train(game_type: GameType, args: argparse.Namespace) -> None:
+    game.train_game_results(
+        game_type,
+        hidden_dims=_parse_hidden_dims(args.hidden_dims),
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+        seed=args.seed,
+        patience=args.patience,
+        weight_decay=args.weight_decay,
+    )
 
 
 def main() -> None:
@@ -69,27 +117,28 @@ def main() -> None:
     if args.command == "update":
         game.resolve_results(game_type)
         game.preprocess_results(game_type)
-        game.train_game_results(game_type)
+        _train(game_type, args)
         game.predict_game_results(game_type)
         return
 
     if args.command == "train":
-        game.train_game_results(
-            game_type,
-            hidden_dim=args.hidden_dim,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-        )
+        _train(game_type, args)
         game.predict_game_results(game_type)
         return
 
     if args.command == "predict":
-        game.predict_game_results(game_type, _split_target(args.target), approaches=args.approaches)
+        game.predict_game_results(
+            game_type,
+            _split_target(args.target),
+            bets_count=args.bets_count,
+            bets_size=args.bets_size,
+            approaches=args.approaches,
+            seed=args.seed,
+        )
         return
 
     if args.command == "evaluate":
-        evaluate_game(game_type, last_n=args.last_n, retrain=args.retrain)
+        evaluate_game(game_type, last_n=args.last_n, retrain=args.retrain, seed=args.seed)
         return
 
     # Legacy / default path (no subcommand).

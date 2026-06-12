@@ -1,14 +1,24 @@
-"""Game data pipeline: load raw JSON into DuckDB, engineer features, train, and predict."""
+"""Game data pipeline: load raw JSON into DuckDB, engineer leak-free features, train, predict.
+
+Feature contract (the core anti-leakage rule):
+    Features ``x_i`` for draw ``i`` are computed ONLY from draws ``0..i-1``.
+    Target ``y_i`` is the k-dim binary vector of draw ``i``'s numbers.
+    The same snapshot logic applied after the final draw yields the inference
+    features for the (unknown) next draw.
+"""
 
 from __future__ import annotations
 
+import itertools
 import json
+import math
+from collections import deque
+from typing import TYPE_CHECKING
 
 import duckdb
 
 from processing.config import (
     DEFAULT_APPROACHES,
-    LOG_INTERVAL,
     GameType,
     game_file,
     get_game_config,
@@ -16,12 +26,28 @@ from processing.config import (
 )
 from processing.train import predict_results, train_results
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 logger = get_logger(__name__)
+
+#: Draws skipped at the start of history — their features rest on too little data.
+WARMUP_DRAWS = 10
+#: Rolling window length for the short-term frequency feature.
+WINDOW_SIZE = 50
 
 
 def resolve_results(game_type: GameType) -> None:
-    """Load ``data/<prefix>.json`` draw results into the game's DuckDB ``results`` table."""
-    get_game_config(game_type)  # validate
+    """Rebuild the game's DuckDB ``results`` table from ``data/<prefix>.json``.
+
+    Draws are ordered by ``drawSystemId`` ascending and assigned a dense ``draw_seq``
+    (0..N-1) — all temporal logic uses ``draw_seq`` because draw ids may have gaps.
+
+    Only results whose ``gameType`` matches the requested game are kept — API dumps bundle
+    side games (e.g. LottoPlus, SuperSzansa) under the same draw ids.
+    """
+    game_config = get_game_config(game_type)
+    expected_game = game_config["prefix"]
 
     json_file = game_file(game_type, "json")
     if not json_file.exists():
@@ -36,157 +62,294 @@ def resolve_results(game_type: GameType) -> None:
         msg = f"File {json_file} is empty"
         raise ValueError(msg)
 
-    db_file = game_file(game_type, "duckdb")
+    draws: dict[int, list[int]] = {}
+    found_game_types: set[str] = set()
+    for item in items:
+        for result in item.get("results", []):
+            result_game = result.get("gameType")
+            if result_game:
+                found_game_types.add(result_game)
+            if result_game is not None and result_game != expected_game:
+                continue
+            draw_id: int = result.get("drawSystemId", 0)
+            draw_numbers: list[int] = result.get("resultsJson", []) + result.get("specialResults", [])
+            if not draw_numbers or not draw_id:
+                continue
+            draws[draw_id] = draw_numbers
 
+    if not draws:
+        msg = (
+            f"File {json_file} contains no draws for gameType '{expected_game}'"
+            f" (found: {sorted(found_game_types) or 'none'})"
+        )
+        raise ValueError(msg)
+
+    rows = [(seq, draw_id, json.dumps(draws[draw_id])) for seq, draw_id in enumerate(sorted(draws))]
+
+    db_file = game_file(game_type, "duckdb")
     with duckdb.connect(db_file) as db:
+        db.sql("DROP TABLE IF EXISTS results")
         db.sql(
             """
-            CREATE TABLE IF NOT EXISTS results (
-                draw_id INTEGER PRIMARY KEY,
-                draw_numbers TEXT,
-                distribution TEXT,
-                step TEXT,
-                repeats TEXT
+            CREATE TABLE results (
+                draw_seq INTEGER PRIMARY KEY,
+                draw_id INTEGER UNIQUE,
+                draw_numbers TEXT
             )
             """,
         )
+        db.executemany("INSERT INTO results VALUES (?, ?, ?)", rows)
 
-        for item in items:
-            results = item.get("results", [])
-            if not results:
-                continue
+    logger.info("Inserted %s draws into %s", len(rows), db_file)
 
-            for result in results:
-                draw_id: int = result.get("drawSystemId", 0)
-                draw_numbers: list[int] = result.get("resultsJson", []) + result.get("specialResults", [])
 
-                if not draw_numbers or not draw_id:
-                    continue
+def _snapshot_features(  # noqa: PLR0913
+    i: int,
+    k: int,
+    counts: Sequence[int],
+    last_seen: Sequence[int],
+    streak: Sequence[int],
+    window: deque[set[int]],
+    prev_draw: list[int] | None,
+) -> list[float]:
+    """Feature vector describing the state BEFORE draw ``i`` (i.e. after draws ``0..i-1``).
 
-                db.execute(
-                    """
-                    INSERT OR REPLACE INTO results (draw_id, draw_numbers)
-                    VALUES (?, ?)
-                    """,
-                    (draw_id, json.dumps(draw_numbers)),
-                )
+    Layout: ``[freq_norm(k), recency_norm(k), streak(k), window_freq(k), prev_sum_norm, prev_odd_ratio]``.
+    """
+    counts_min, counts_max = min(counts), max(counts)
+    divider = (counts_max - counts_min) or 1
+    freq_norm = [(c - counts_min) / divider for c in counts]
 
-                if draw_id % LOG_INTERVAL == 0:
-                    logger.info("Inserted %s draws", draw_id)
+    recency_norm = [1.0 if last_seen[j] < 0 else (i - 1 - last_seen[j]) / max(i, 1) for j in range(k)]
+
+    streak_f = [float(s) for s in streak]
+
+    window_len = len(window)
+    window_freq = [sum(1 for drawn in window if j + 1 in drawn) / window_len if window_len else 0.0 for j in range(k)]
+
+    if prev_draw:
+        prev_sum_norm = sum(prev_draw) / (len(prev_draw) * k)
+        prev_odd_ratio = sum(1 for v in prev_draw if v % 2) / len(prev_draw)
+    else:
+        prev_sum_norm = 0.5
+        prev_odd_ratio = 0.5
+
+    return freq_norm + recency_norm + streak_f + window_freq + [prev_sum_norm, prev_odd_ratio]
+
+
+def compute_feature_rows(
+    draws: list[list[int]],
+    k: int,
+    warmup: int = WARMUP_DRAWS,
+) -> tuple[list[tuple[int, list[float], list[int]]], list[float]]:
+    """Compute leak-free ``(draw_seq, x, y)`` rows plus the inference features for the next draw.
+
+    For each draw ``i`` the state counters are snapshotted FIRST (x_i depends only on
+    draws < i) and updated with draw ``i``'s numbers AFTER. The trailing snapshot taken
+    once all draws are consumed is the feature vector for the not-yet-drawn next draw.
+    """
+    counts = [0] * k
+    last_seen = [-1] * k
+    streak = [0] * k
+    window: deque[set[int]] = deque(maxlen=WINDOW_SIZE)
+
+    rows: list[tuple[int, list[float], list[int]]] = []
+    prev_draw: list[int] | None = None
+
+    for i, draw_numbers in enumerate(draws):
+        x = _snapshot_features(i, k, counts, last_seen, streak, window, prev_draw)
+        drawn = set(draw_numbers)
+        if i >= warmup:
+            y = [1 if j + 1 in drawn else 0 for j in range(k)]
+            rows.append((i, x, y))
+
+        for j in range(k):
+            if j + 1 in drawn:
+                counts[j] += 1
+                last_seen[j] = i
+                streak[j] += 1
+            else:
+                streak[j] = 0
+        window.append(drawn)
+        prev_draw = draw_numbers
+
+    x_next = _snapshot_features(len(draws), k, counts, last_seen, streak, window, prev_draw)
+    return rows, x_next
+
+
+def _load_draws(game_type: GameType) -> list[list[int]]:
+    """Load all draws ordered by ``draw_seq`` from the game's DuckDB."""
+    db_file = game_file(game_type, "duckdb")
+    with duckdb.connect(db_file) as db:
+        raw = db.sql("SELECT draw_numbers FROM results ORDER BY draw_seq ASC").fetchall()
+    return [json.loads(numbers) for (numbers,) in raw]
 
 
 def preprocess_results(game_type: GameType) -> None:
-    """Compute distribution/step/repeats features for every draw and persist them in DuckDB."""
+    """Compute leak-free features for every draw and persist them in the ``features`` table."""
     game_config = get_game_config(game_type)
-    n = game_config["n"]
-    k = game_config["k"]
+    n, k = game_config["n"], game_config["k"]
     db_file = game_file(game_type, "duckdb")
 
-    distribution = [0] * k
-    last_draw_id = [0] * k
-    step = [0] * k
-    repeats = [0] * k
+    draws = _load_draws(game_type)
+    valid_draws = []
+    for seq, draw_numbers in enumerate(draws):
+        if len(draw_numbers) < n:
+            logger.warning("Skipping draw_seq %s: expected >=%s numbers, got %s", seq, n, len(draw_numbers))
+            continue
+        valid_draws.append(draw_numbers)
 
+    rows, _ = compute_feature_rows(valid_draws, k)
+    if not rows:
+        msg = f"Not enough draws to build features (need > {WARMUP_DRAWS})"
+        raise ValueError(msg)
+
+    db_rows = [(seq, json.dumps(x), json.dumps(y)) for seq, x, y in rows]
     with duckdb.connect(db_file) as db:
-        results = db.sql(
-            "SELECT draw_id, draw_numbers FROM results ORDER BY draw_id ASC",
-        ).fetchall()
-
-        for draw_id, draw_numbers_str in results:
-            draw_numbers: list[int] = json.loads(draw_numbers_str)
-
-            if len(draw_numbers) < n:
-                logger.warning("Skipping draw %s: expected >=%s numbers, got %s", draw_id, n, len(draw_numbers))
-                continue
-
-            for number in draw_numbers:
-                distribution[number - 1] += 1
-                step[number - 1] = draw_id - last_draw_id[number - 1]
-                last_draw_id[number - 1] = draw_id
-
-            distribution_min = min(distribution)
-            distribution_max = max(distribution)
-
-            for i in range(k):
-                if last_draw_id[i] == draw_id:
-                    repeats[i] += 1
-                else:
-                    repeats[i] = 0
-                    step[i] = draw_id - last_draw_id[i]
-
-            _distribution = [0.0] * n
-            _step = [0] * n
-            _repeats = [0] * n
-
-            for i in range(n):
-                number = draw_numbers[i]
-                divider = distribution_max - distribution_min or 1
-                _distribution[i] = (distribution[number - 1] - distribution_min) / divider
-                _step[i] = step[number - 1] - 1
-                _repeats[i] = repeats[number - 1] - 1
-
-            db.execute(
-                """
-                UPDATE results
-                SET distribution = ?,
-                    step = ?,
-                    repeats = ?
-                WHERE draw_id = ?
-                """,
-                (
-                    json.dumps(_distribution),
-                    json.dumps(_step),
-                    json.dumps(_repeats),
-                    draw_id,
-                ),
+        db.sql("DROP TABLE IF EXISTS features")
+        db.sql(
+            """
+            CREATE TABLE features (
+                draw_seq INTEGER PRIMARY KEY,
+                x TEXT,
+                y TEXT
             )
+            """,
+        )
+        db.executemany("INSERT INTO features VALUES (?, ?, ?)", db_rows)
 
-            if draw_id % LOG_INTERVAL == 0:
-                logger.info("Processed %s draws", draw_id)
+    logger.info("Stored %s feature rows", len(db_rows))
 
 
-def train_game_results(
+def build_inference_features(game_type: GameType) -> list[float]:
+    """Return the feature vector for the next (unknown) draw — state after the final draw."""
+    game_config = get_game_config(game_type)
+    n, k = game_config["n"], game_config["k"]
+    draws = [d for d in _load_draws(game_type) if len(d) >= n]
+    _, x_next = compute_feature_rows(draws, k)
+    return x_next
+
+
+def generate_bets(pool: list[int], count: int, size: int) -> list[list[int]]:
+    """Generate up to ``count`` deterministic bets from a probability-ordered ``pool``.
+
+    Phase 1 walks the pool top-down in consecutive chunks: bet 1 = the ``size`` best
+    numbers, bet 2 = the next ``size``, ... until the pool is exhausted (a final partial
+    chunk is completed with the best numbers not already in it). Phase 2 continues with
+    the next-best rank combinations in lexicographic order (top size-1 numbers + each
+    following one, ...), skipping bets already emitted.
+
+    Numbers inside a bet keep pool (probability) order. No repeated numbers within a bet,
+    no repeated combinations. If ``pool`` has fewer than ``size`` numbers, bet size
+    shrinks to the pool size. If fewer than ``count`` unique combinations exist, all of
+    them are returned.
+    """
+    size_eff = min(size, len(pool))
+    if size_eff == 0 or count < 1:
+        return []
+
+    target = min(count, math.comb(len(pool), size_eff))
+    bets: list[list[int]] = []
+    seen: set[tuple[int, ...]] = set()
+
+    def add(indices: tuple[int, ...]) -> None:
+        if indices not in seen and len(bets) < target:
+            seen.add(indices)
+            bets.append([pool[i] for i in indices])
+
+    # Phase 1: consecutive top-down chunks until the whole pool is used.
+    full_chunks = len(pool) // size_eff
+    for chunk in range(full_chunks):
+        add(tuple(range(chunk * size_eff, (chunk + 1) * size_eff)))
+    if len(pool) % size_eff:
+        leftover = set(range(full_chunks * size_eff, len(pool)))
+        fillers = (i for i in range(len(pool)) if i not in leftover)
+        while len(leftover) < size_eff:
+            leftover.add(next(fillers))
+        add(tuple(sorted(leftover)))
+
+    # Phase 2: restart from the top with the next-best combinations (lexicographic ranks).
+    if len(bets) < target:
+        for combo in itertools.combinations(range(len(pool)), size_eff):
+            if len(bets) >= target:
+                break
+            add(combo)
+
+    return bets
+
+
+def train_game_results(  # noqa: PLR0913
     game_type: GameType,
-    hidden_dim: int = 128,
+    hidden_dims: list[int] | None = None,
     epochs: int = 100,
     batch_size: int = 32,
     learning_rate: float = 0.001,
+    seed: int = 42,
+    patience: int = 10,
+    weight_decay: float | None = None,
 ) -> None:
-    """Train the MLP on the game's preprocessed features and save model + loss plot."""
+    """Train the classifier on the game's leak-free features and save model + loss plot."""
     get_game_config(game_type)  # validate
 
+    kwargs = {} if weight_decay is None else {"weight_decay": weight_decay}
     train_results(
         game_file(game_type, "duckdb"),
         game_file(game_type, "pth"),
         game_file(game_type, "png"),
-        hidden_dim=hidden_dim,
+        hidden_dims=hidden_dims,
         epochs=epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
+        seed=seed,
+        patience=patience,
+        **kwargs,
     )
 
 
-def predict_game_results(
+def predict_game_results(  # noqa: PLR0913
     game_type: GameType,
     target: list[str] | None = None,
+    bets_count: int | None = None,
+    bets_size: int | None = None,
     approaches: int = DEFAULT_APPROACHES,
+    seed: int = 42,
 ) -> None:
-    """Predict the next draw and log numbers grouped by frequency, with target hits if provided."""
-    game_config = get_game_config(game_type)
-    n = game_config["n"]
-    k = game_config["k"]
-    db_file = game_file(game_type, "duckdb")
-    model_file = game_file(game_type, "pth")
+    """Predict the next draw: top-n probabilities, MC-dropout groups, and bets.
 
-    logger.info("Predictions:")
+    Bets walk ALL k predicted numbers (probability order) in consecutive chunks, then
+    continue with the next-best rank combinations — see :func:`generate_bets`.
+    """
+    game_config = get_game_config(game_type)
+    n, k = game_config["n"], game_config["k"]
+    bets_config = game_config["bets"]
+    count = bets_count if bets_count is not None else bets_config["count"]
+    size = bets_size if bets_size is not None else bets_config["size"]
+
+    x_next = build_inference_features(game_type)
+    top, grouped = predict_results(game_file(game_type, "pth"), x_next, n, approaches=approaches, seed=seed)
 
     target_array = [int(i) for i in target] if target else []
 
-    predictions = predict_results(db_file, model_file, approaches, n, k)
-    for count, prediction in predictions.items():
-        label = f"numbers predicted x{count}"
+    logger.info("Predicted top %s numbers (number: probability):", k)
+    predicted_numbers = [num for num, _ in top[:n]]  # top-n drive target hits and bets
+    for num, prob in top:
+        marker = " 🎯" if num in target_array else ""
+        logger.info("  %2d: %.4f%s", num, prob, marker)
+    if target_array:
+        hits = sum(1 for i in target_array if i in predicted_numbers)
+        logger.info("Target hits in top %s: %s of %s", n, hits, len(target_array))
+
+    logger.info("Predictions:")
+    for group_count, numbers in grouped.items():
+        label = f"numbers predicted x{group_count}"
         if target_array:
-            hits = sum(1 for i in target_array if i in prediction)
-            logger.info("%23s: %s 🙈 target hits %s of %s", label, prediction, hits, len(prediction))
+            hits = sum(1 for i in target_array if i in numbers)
+            logger.info("%23s: %s 🙈 target hits %s of %s", label, numbers, hits, len(numbers))
         else:
-            logger.info("%23s: %s", label, prediction)
+            logger.info("%23s: %s", label, numbers)
+
+    pool = [num for num, _ in top]  # all k numbers, in probability order
+    bets = generate_bets(pool, count, size)
+    logger.info("Bets (%s x %s numbers from the top %s predicted):", len(bets), min(size, len(pool)), len(pool))
+    for i, bet in enumerate(bets, start=1):
+        logger.info("  bet %2d: %s", i, bet)

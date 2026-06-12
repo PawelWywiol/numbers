@@ -1,5 +1,5 @@
 {
-  "Lotto": { "prefix": "Lotto", "n": 6, "k": 49 },
-  "MultiMulti": { "prefix": "MultiMulti", "n": 20, "k": 80 },
-  "Szybkie600": { "prefix": "Szybkie600", "n": 6, "k": 32 }
+    "Lotto": { "prefix": "Lotto", "n": 6, "k": 49, "bets": { "count": 8, "size": 6 } },
+    "MultiMulti": { "prefix": "MultiMulti", "n": 20, "k": 80, "bets": { "count": 8, "size": 10 } },
+    "Szybkie600": { "prefix": "Szybkie600", "n": 6, "k": 32, "bets": { "count": 8, "size": 5 } }
 }

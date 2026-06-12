@@ -21,7 +21,7 @@ GAMES_FILE = Path(__file__).parent / "games.json"
 
 #: How often progress is logged while inserting/processing draws.
 LOG_INTERVAL = 1000
-#: Number of stochastic forward passes aggregated into a single prediction.
+#: Number of MC-dropout forward passes aggregated into the grouped prediction view.
 DEFAULT_APPROACHES = 100
 
 
@@ -43,12 +43,36 @@ class GameType(Enum):
             raise ValueError(msg) from None
 
 
+class BetsConfig(TypedDict):
+    """Bet generation: ``count`` bets of ``size`` numbers sampled from the top prediction group."""
+
+    count: int
+    size: int
+
+
 class GameConfig(TypedDict):
-    """Parameters defining a game: file ``prefix``, ``n`` numbers drawn from a pool of ``k``."""
+    """Parameters defining a game: file ``prefix``, ``n`` numbers drawn from a pool of ``k``, ``bets``."""
 
     prefix: str
     n: int
     k: int
+    bets: BetsConfig
+
+
+def _validate_bets(name: str, cfg: GameConfig) -> None:
+    """Validate the ``bets`` section of a game config."""
+    bets = cfg.get("bets")
+    if not bets:
+        msg = f"games.json game '{name}' is missing the 'bets' section ({{count, size[, pool]}})"
+        raise ValueError(msg)
+
+    count, size = bets.get("count", 0), bets.get("size", 0)
+    if count < 1 or size < 1:
+        msg = f"games.json game '{name}': bets count and size must be >= 1"
+        raise ValueError(msg)
+    if size > cfg["k"]:
+        msg = f"games.json game '{name}': bets size must be <= k ({size} <= {cfg['k']})"
+        raise ValueError(msg)
 
 
 def _load_games_config() -> dict[GameType, GameConfig]:
@@ -62,6 +86,7 @@ def _load_games_config() -> dict[GameType, GameConfig]:
         if name not in valid:
             msg = f"games.json defines unknown game '{name}'; add it to GameType first"
             raise ValueError(msg)
+        _validate_bets(name, cfg)
         config[GameType(name)] = cfg
     return config
 
