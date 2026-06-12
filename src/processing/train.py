@@ -1,11 +1,22 @@
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING
 
 import duckdb
 import matplotlib.pyplot as plt
-import pandas as pd
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
+
+from processing.config import get_logger
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pandas as pd
+
+logger = get_logger(__name__)
 
 
 class MLP(nn.Module):
@@ -23,13 +34,12 @@ class MLP(nn.Module):
         return self.layers(x)
 
 
-def load_data(db_file: str) -> pd.DataFrame:
-    conn = duckdb.connect(db_file)
+def load_data(db_file: str | Path) -> pd.DataFrame:
     query = """
         SELECT distribution, step, repeats, draw_numbers FROM results ORDER BY draw_id ASC
     """
-    results = conn.execute(query).df()
-    conn.close()
+    with duckdb.connect(db_file) as conn:
+        results = conn.execute(query).df()
 
     for col in ["distribution", "step", "repeats", "draw_numbers"]:
         results[col] = results[col].apply(json.loads)
@@ -69,9 +79,9 @@ def process_predictions(predictions: torch.Tensor, n: int = 20, k: int = 80, min
 
 
 def train_results(  # noqa: PLR0913
-    db_file: str,
-    model_file: str,
-    plot_file: str,
+    db_file: str | Path,
+    model_file: str | Path,
+    plot_file: str | Path,
     hidden_dim: int = 128,
     epochs: int = 100,
     batch_size: int = 32,
@@ -118,12 +128,10 @@ def train_results(  # noqa: PLR0913
         avg_diff = sum(avg_val_diff) / max(len(avg_val_diff), 1)
         avg_diff_percent = avg_diff / max(val_losses[-1], 1)
 
-        print(  # noqa: T201
-            f"Epoch {epoch + 1}/{epochs}, loss diff: {avg_diff:.6f} ({avg_diff_percent:.2%}), ",
-        )
+        logger.info("Epoch %s/%s, loss diff: %.6f (%.2f%%)", epoch + 1, epochs, avg_diff, avg_diff_percent * 100)
 
     torch.save(model.state_dict(), model_file)
-    print(f"Model trained and saved as '{model_file}'")  # noqa: T201
+    logger.info("Model trained and saved as '%s'", model_file)
 
     # Wykres strat
     plt.figure(figsize=(10, 5))
@@ -138,8 +146,8 @@ def train_results(  # noqa: PLR0913
 
 
 def predict_results(  # noqa: PLR0913
-    db_file: str,
-    model_file: str,
+    db_file: str | Path,
+    model_file: str | Path,
     approaches: int,
     n: int,
     k: int,
@@ -150,7 +158,7 @@ def predict_results(  # noqa: PLR0913
 
     input_dim, output_dim = x.shape[1], y.shape[1]
     model = MLP(input_dim, hidden_dim, output_dim)
-    model.load_state_dict(torch.load(model_file))
+    model.load_state_dict(torch.load(model_file, weights_only=True))
 
     distribution = [0] * k
 

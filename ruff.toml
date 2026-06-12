@@ -40,7 +40,8 @@ target-version = "py39"
 [lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
 select = ['ALL']
-ignore = ['D']
+# D: docstring rules; COM812: conflicts with the formatter (trailing-comma).
+ignore = ['D', 'COM812']
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
@@ -63,5 +64,5 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [lint.per-file-ignores]
-# Ignore all directories named `tests`.
-"tests/**" = ["INP001", "S101"]
+# Tests: allow asserts, magic values in assertions, and untyped fixture params.
+"tests/**" = ["INP001", "S101", "PLR2004", "ANN001"]
