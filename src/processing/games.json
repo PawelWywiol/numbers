@@ -1,26 +1,26 @@
 {
-  "Lotto": {
-    "prefix": "Lotto",
-    "n": 6,
-    "k": 49,
-    "bets": { "count": 8, "size": 6 },
-    "prizes": [{ "size": 6, "stake": 2.4, "payouts": [0, 0, 0, 24, 36, 0, 2000000] }]
-  },
-  "MultiMulti": {
-    "prefix": "MultiMulti",
-    "n": 20,
-    "k": 80,
-    "bets": { "count": 8, "size": 10 },
-    "prizes": [
-      { "size": 5, "stake": 2, "payouts": [0, 0, 0, 4, 8, 700] },
-      { "size": 10, "stake": 2, "payouts": [0, 0, 0, 0, 2, 4, 12, 140, 520, 10000, 250000] }
-    ]
-  },
-  "Szybkie600": {
-    "prefix": "Szybkie600",
-    "n": 6,
-    "k": 32,
-    "bets": { "count": 8, "size": 5 },
-    "prizes": [{ "size": 6, "stake": 2, "payouts": [0, 0, 2, 4, 50, 250, 31200] }]
-  }
+    "Lotto": {
+        "prefix": "Lotto",
+        "n": 6,
+        "k": 49,
+        "bets": { "count": 8, "size": 6 },
+        "prizes": [{ "size": 6, "stake": 2.4, "payouts": [0, 0, 0, 24, 36, 0, 2000000] }]
+    },
+    "MultiMulti": {
+        "prefix": "MultiMulti",
+        "n": 20,
+        "k": 80,
+        "bets": { "count": 8, "size": 10 },
+        "prizes": [
+            { "size": 5, "stake": 2, "payouts": [0, 0, 0, 4, 8, 700] },
+            { "size": 10, "stake": 2, "payouts": [0, 0, 0, 0, 2, 4, 12, 140, 520, 10000, 250000] }
+        ]
+    },
+    "Szybkie600": {
+        "prefix": "Szybkie600",
+        "n": 6,
+        "k": 32,
+        "bets": { "count": 8, "size": 6 },
+        "prizes": [{ "size": 6, "stake": 2, "payouts": [0, 0, 2, 4, 50, 250, 31200] }]
+    }
 }
