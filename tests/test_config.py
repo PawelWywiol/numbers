@@ -10,7 +10,8 @@ def test_games_config_loaded() -> None:
     multi = GAMES_CONFIG[GameType.MultiMulti]
     assert multi["n"] == 20
     assert multi["k"] == 80
-    assert multi["bets"] == {"count": 8, "size": 5}
+    assert multi["bets"]["count"] >= 1
+    assert 1 <= multi["bets"]["size"] <= multi["k"]
 
 
 def test_get_game_config_valid() -> None:

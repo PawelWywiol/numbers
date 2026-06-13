@@ -221,6 +221,25 @@ def preprocess_results(game_type: GameType) -> None:
     logger.info("Stored %s feature rows", len(db_rows))
 
 
+def _features_exist(game_type: GameType) -> bool:
+    """Return whether the game's DuckDB already has a populated ``features`` table."""
+    db_file = game_file(game_type, "duckdb")
+    if not db_file.exists():
+        return False
+    with duckdb.connect(db_file) as db:
+        found = db.sql("SELECT 1 FROM information_schema.tables WHERE table_name = 'features'").fetchall()
+    return bool(found)
+
+
+def ensure_features(game_type: GameType) -> None:
+    """Build the ``features`` table from JSON if it is missing, so train/predict just work."""
+    if _features_exist(game_type):
+        return
+    logger.info("No features for %s yet — building from data/%s.json ...", game_type.value, game_type.value)
+    resolve_results(game_type)
+    preprocess_results(game_type)
+
+
 def build_inference_features(game_type: GameType) -> list[float]:
     """Return the feature vector for the next (unknown) draw — state after the final draw."""
     game_config = get_game_config(game_type)
@@ -290,6 +309,7 @@ def train_game_results(  # noqa: PLR0913
 ) -> None:
     """Train the classifier on the game's leak-free features and save model + loss plot."""
     get_game_config(game_type)  # validate
+    ensure_features(game_type)
 
     kwargs = {} if weight_decay is None else {"weight_decay": weight_decay}
     train_results(
@@ -324,6 +344,7 @@ def predict_game_results(  # noqa: PLR0913
     bets_config = game_config["bets"]
     count = bets_count if bets_count is not None else bets_config["count"]
     size = bets_size if bets_size is not None else bets_config["size"]
+    ensure_features(game_type)
 
     x_next = build_inference_features(game_type)
     top, grouped = predict_results(game_file(game_type, "pth"), x_next, n, approaches=approaches, seed=seed)
