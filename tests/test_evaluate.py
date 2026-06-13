@@ -10,6 +10,7 @@ from processing.evaluate import (
     _frequency_top_n,
     binomial_p_value,
     expected_random_hits,
+    hypergeometric_distribution,
 )
 
 
@@ -69,6 +70,28 @@ def test_calibration_buckets() -> None:
     assert by_low[0.5]["observed_rate"] == 0.5
     assert by_low[0.9]["observed_rate"] == 1.0
     assert math.isclose(by_low[0.9]["mean_predicted"], 0.95)
+
+
+def test_hypergeometric_distribution_sums_to_one() -> None:
+    dist = hypergeometric_distribution(6, 6, 49)  # pick 6, 6 drawn from 49
+    assert len(dist) == 7  # h = 0..6
+    assert math.isclose(sum(dist), 1.0, rel_tol=1e-12)
+    assert all(p >= 0 for p in dist)
+
+
+def test_hypergeometric_distribution_matches_known_value() -> None:
+    # Pick 2 of 4, 2 drawn: P(0 hits) = C(2,0)C(2,2)/C(4,2) = 1/6
+    dist = hypergeometric_distribution(2, 2, 4)
+    assert math.isclose(dist[0], 1 / 6, rel_tol=1e-12)
+    assert math.isclose(dist[2], 1 / 6, rel_tol=1e-12)
+    assert math.isclose(dist[1], 4 / 6, rel_tol=1e-12)
+
+
+def test_hypergeometric_distribution_pick_differs_from_drawn() -> None:
+    # MultiMulti bet-5: pick 5, 20 drawn from 80 -> probabilities for 0..5 hits
+    dist = hypergeometric_distribution(5, 20, 80)
+    assert len(dist) == 6
+    assert math.isclose(sum(dist), 1.0, rel_tol=1e-12)
 
 
 def test_calibration_includes_probability_one() -> None:

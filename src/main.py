@@ -35,6 +35,11 @@ def _add_train_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="L2 regularization for Adam (default: 1e-4, calibrated so val loss stays flat).",
     )
+    parser.add_argument(
+        "--histogram",
+        action="store_true",
+        help="Append a hit-count distribution (top-n vs every actual draw) after predicting.",
+    )
 
 
 def _add_bet_args(parser: argparse.ArgumentParser) -> None:
@@ -71,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_APPROACHES,
         help="MC-dropout forward passes for the grouped prediction view.",
+    )
+    p_predict.add_argument(
+        "--histogram",
+        action="store_true",
+        help="Append a hit-count distribution (top-n vs every actual draw) below the bets.",
     )
     _add_bet_args(p_predict)
 
@@ -118,12 +128,12 @@ def main() -> None:
         game.resolve_results(game_type)
         game.preprocess_results(game_type)
         _train(game_type, args)
-        game.predict_game_results(game_type)
+        game.predict_game_results(game_type, histogram=args.histogram)
         return
 
     if args.command == "train":
         _train(game_type, args)
-        game.predict_game_results(game_type)
+        game.predict_game_results(game_type, histogram=args.histogram)
         return
 
     if args.command == "predict":
@@ -134,6 +144,7 @@ def main() -> None:
             bets_size=args.bets_size,
             approaches=args.approaches,
             seed=args.seed,
+            histogram=args.histogram,
         )
         return
 

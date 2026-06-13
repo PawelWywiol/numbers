@@ -2,7 +2,14 @@
 
 import pytest
 
-from processing.config import GAMES_CONFIG, GameType, _validate_bets, game_file, get_game_config
+from processing.config import (
+    GAMES_CONFIG,
+    GameType,
+    _validate_bets,
+    _validate_prizes,
+    game_file,
+    get_game_config,
+)
 
 
 def test_games_config_loaded() -> None:
@@ -54,3 +61,45 @@ def test_validate_bets_size_exceeds_k() -> None:
 def test_validate_bets_valid() -> None:
     cfg = {"prefix": "X", "n": 6, "k": 49, "bets": {"count": 8, "size": 6}}
     _validate_bets("X", cfg)  # type: ignore[arg-type]  # does not raise
+
+
+def test_validate_prizes_absent_is_ok() -> None:
+    _validate_prizes("X", {"prefix": "X", "n": 6, "k": 49, "bets": {"count": 8, "size": 6}})  # type: ignore[arg-type]
+
+
+def test_validate_prizes_wrong_length() -> None:
+    cfg = {
+        "prefix": "X",
+        "n": 6,
+        "k": 49,
+        "bets": {"count": 8, "size": 6},
+        "prizes": [{"size": 6, "stake": 2, "payouts": [0, 1]}],
+    }
+    with pytest.raises(ValueError, match="payouts must have size\\+1=7"):
+        _validate_prizes("X", cfg)  # type: ignore[arg-type]
+
+
+def test_validate_prizes_bad_size() -> None:
+    cfg = {
+        "prefix": "X",
+        "n": 6,
+        "k": 49,
+        "bets": {"count": 8, "size": 6},
+        "prizes": [{"size": 99, "stake": 2, "payouts": [0]}],
+    }
+    with pytest.raises(ValueError, match="prize plan size must be 1..k"):
+        _validate_prizes("X", cfg)  # type: ignore[arg-type]
+
+
+def test_validate_prizes_multiple_plans_valid() -> None:
+    cfg = {
+        "prefix": "X",
+        "n": 20,
+        "k": 80,
+        "bets": {"count": 8, "size": 10},
+        "prizes": [
+            {"size": 5, "stake": 2, "payouts": [0, 0, 0, 4, 8, 700]},
+            {"size": 10, "stake": 2, "payouts": [0, 0, 0, 0, 2, 4, 12, 140, 520, 10000, 250000]},
+        ],
+    }
+    _validate_prizes("X", cfg)  # type: ignore[arg-type]  # does not raise

@@ -50,13 +50,29 @@ class BetsConfig(TypedDict):
     size: int
 
 
-class GameConfig(TypedDict):
-    """Parameters defining a game: file ``prefix``, ``n`` numbers drawn from a pool of ``k``, ``bets``."""
+class PrizePlan(TypedDict):
+    """One ticket plan: bet ``size`` numbers at ``stake``; ``payouts[h]`` won at ``h`` hits (len size+1)."""
 
+    size: int
+    stake: float
+    payouts: list[float]
+
+
+class _GameConfigRequired(TypedDict):
     prefix: str
     n: int
     k: int
     bets: BetsConfig
+
+
+class GameConfig(_GameConfigRequired, total=False):
+    """Parameters defining a game: file ``prefix``, ``n`` numbers from a pool of ``k``, ``bets``, ``prizes``.
+
+    ``prizes`` is a list of plans — one payout summary is produced per plan (MultiMulti has two:
+    bet-5 and bet-10; Szybkie600/Lotto have one).
+    """
+
+    prizes: list[PrizePlan]
 
 
 def _validate_bets(name: str, cfg: GameConfig) -> None:
@@ -75,6 +91,25 @@ def _validate_bets(name: str, cfg: GameConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_prizes(name: str, cfg: GameConfig) -> None:
+    """Validate the optional ``prizes`` list: each plan's payouts must cover 0..size hits."""
+    prizes = cfg.get("prizes")
+    if prizes is None:
+        return
+
+    for plan in prizes:
+        size, stake, payouts = plan.get("size"), plan.get("stake"), plan.get("payouts")
+        if not size or not (1 <= size <= cfg["k"]):
+            msg = f"games.json game '{name}': prize plan size must be 1..k ({cfg['k']})"
+            raise ValueError(msg)
+        if stake is None or stake < 0:
+            msg = f"games.json game '{name}': prize plan stake must be >= 0"
+            raise ValueError(msg)
+        if not payouts or len(payouts) != size + 1:
+            msg = f"games.json game '{name}': prize plan payouts must have size+1={size + 1} entries (0..size hits)"
+            raise ValueError(msg)
+
+
 def _load_games_config() -> dict[GameType, GameConfig]:
     """Load and validate ``games.json`` into a ``{GameType: GameConfig}`` mapping."""
     with GAMES_FILE.open(encoding="utf-8") as f:
@@ -87,6 +122,7 @@ def _load_games_config() -> dict[GameType, GameConfig]:
             msg = f"games.json defines unknown game '{name}'; add it to GameType first"
             raise ValueError(msg)
         _validate_bets(name, cfg)
+        _validate_prizes(name, cfg)
         config[GameType(name)] = cfg
     return config
 

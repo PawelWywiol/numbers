@@ -34,6 +34,10 @@ uv run src/main.py predict --game MultiMulti
 uv run src/main.py predict --game MultiMulti --target 2,3,7,17 --approaches 200
 uv run src/main.py predict --game MultiMulti --bets-count 10 --bets-size 4
 
+# Append a hit-count histogram: how often the top-n picks hit 0,1,...,n actual numbers
+# across every draw, next to the hypergeometric random baseline (static model, in-sample)
+uv run src/main.py predict --game MultiMulti --histogram
+
 # Load local JSON + rebuild features + train + predict
 uv run src/main.py update --game MultiMulti
 
@@ -44,6 +48,9 @@ uv run src/main.py train --game MultiMulti --epochs 100 --lr 0.001 --hidden-dims
 
 # Train to the end: --patience 0 disables early stopping (all epochs run, final weights saved)
 uv run src/main.py train --game MultiMulti --epochs 100 --patience 0
+
+# --histogram works on train/update too (appended after the post-training prediction)
+uv run src/main.py train --game Szybkie600 --epochs 70 --patience 0 --histogram
 
 # Backtest vs random + frequency baselines (static = fast, in-sample sanity check)
 uv run src/main.py evaluate --game MultiMulti --last-n 50
@@ -99,6 +106,12 @@ Each game type has specific parameters defined in `src/processing/games.json`:
 - **n**: Number of balls drawn
 - **k**: Total numbers in the pool
 - **prefix**: Used for file naming
+- **prizes** (optional): a list of plans, each `{size, stake, payouts}` — bet `size` numbers (the top-`size`
+  predictions) at `stake`, `payouts[h]` won at `h` hits (length `size+1`). When present, `--histogram`
+  adds one hit-histogram + theoretical profit/loss per plan. MultiMulti has two plans (bet-5 and bet-10);
+  Szybkie600/Lotto one. Amounts come from each game's official prize table (base stake, without bonus
+  options). Lotto's higher tiers are pari-mutuel (variable); its payouts use the regulamin's guaranteed
+  minimums (3→24 zł fixed, 4→36 zł min, 6→2 000 000 zł min pool), so the result is a lower-bound estimate.
 - **bets**: `{count, size}` — generate `count` deterministic bets of `size` numbers from the full
   k-number ranking in probability order: bet 1 = the `size` best numbers, bet 2 = the next `size`, ...
   until the pool is exhausted; further bets restart from the top with the next-best rank combinations

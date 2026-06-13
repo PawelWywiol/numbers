@@ -9,11 +9,14 @@ binomial significance test, and probability calibration.
 from __future__ import annotations
 
 import math
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from processing.config import GameType, game_file, get_game_config, get_logger
 from processing.train import (
@@ -94,6 +97,32 @@ def _frequency_top_n(y_history: torch.Tensor, n: int) -> set[int]:
     """Top ``n`` most frequent numbers in the historical targets (the naive-player baseline)."""
     counts = y_history.sum(dim=0)
     return {int(idx) + 1 for idx in torch.topk(counts, n).indices.tolist()}
+
+
+def hypergeometric_distribution(pick: int, drawn: int, k: int) -> list[float]:
+    """Random baseline: P(exactly ``h`` of your ``pick`` numbers are among ``drawn`` drawn from ``k``).
+
+    Returns probabilities for ``h = 0..pick``. This is what pure chance produces — a model's
+    hit histogram is only meaningful compared against it.
+    """
+    denom = math.comb(k, pick)
+    return [math.comb(drawn, h) * math.comb(k - drawn, pick - h) / denom for h in range(pick + 1)]
+
+
+def hit_distribution(model_file: str | Path, db_file: str | Path, pick: int) -> list[int]:
+    """Histogram of correct picks: for every draw, how many of the top-``pick`` predictions were drawn.
+
+    Uses the saved (static) model in a single batched forward pass over all draws — fast, but
+    in-sample (the model trained on these draws), so it is optimistic vs a walk-forward backtest.
+    Returns a list where index ``h`` holds the number of draws with exactly ``h`` correct picks.
+    """
+    x, y = preprocess_data(load_data(db_file))
+    model = load_model(model_file)
+    with torch.no_grad():
+        logits = model(x)
+    top_idx = torch.topk(logits, pick, dim=1).indices
+    hits = torch.gather(y, 1, top_idx).sum(dim=1).to(torch.int64)
+    return torch.bincount(hits, minlength=pick + 1).tolist()
 
 
 def _train_subset(  # noqa: PLR0913

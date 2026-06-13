@@ -20,10 +20,12 @@ import duckdb
 from processing.config import (
     DEFAULT_APPROACHES,
     GameType,
+    PrizePlan,
     game_file,
     get_game_config,
     get_logger,
 )
+from processing.evaluate import hit_distribution, hypergeometric_distribution
 from processing.train import predict_results, train_results
 
 if TYPE_CHECKING:
@@ -326,6 +328,68 @@ def train_game_results(  # noqa: PLR0913
     )
 
 
+def _log_hit_distribution_for_pick(game_type: GameType, pick: int) -> list[int]:
+    """Log (and return) the hit histogram for the top-``pick`` predictions vs every actual draw."""
+    k = get_game_config(game_type)["k"]
+    counts = hit_distribution(game_file(game_type, "pth"), game_file(game_type, "duckdb"), pick)
+    random_pct = hypergeometric_distribution(pick, get_game_config(game_type)["n"], k)
+    total = sum(counts)
+
+    logger.info("Hit distribution over %s draws (static model top-%s vs actual | random baseline):", total, pick)
+    for h, count in enumerate(counts):
+        model_pct = 100 * count / total if total else 0.0
+        logger.info("  x%-2d: %6d  (%6.3f%% | random %6.3f%%)", h, count, model_pct, 100 * random_pct[h])
+    return counts
+
+
+def log_hit_distribution(game_type: GameType) -> None:
+    """Log model hit histograms and, when configured, a theoretical payout per prize plan.
+
+    Replays every draw with the static model (fast, single batched pass). Without ``prizes``
+    a single top-n histogram is shown; with ``prizes`` one histogram + payout is shown per plan
+    (MultiMulti: bet-5 and bet-10). In-sample, so optimistic vs a walk-forward backtest.
+    """
+    game_config = get_game_config(game_type)
+    prizes = game_config.get("prizes")
+
+    if not prizes:
+        _log_hit_distribution_for_pick(game_type, game_config["n"])
+        return
+
+    for plan in prizes:
+        logger.info("--- Plan: bet %s numbers (stake %g) ---", plan["size"], plan["stake"])
+        counts = _log_hit_distribution_for_pick(game_type, plan["size"])
+        _log_payout(counts, plan)
+
+
+def _money(value: float) -> str:
+    """Format a money amount without scientific notation (integers shown without decimals)."""
+    return f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
+
+
+def _log_payout(counts: list[int], plan: PrizePlan) -> None:
+    """Log theoretical profit/loss: one ticket (top-``size`` picks) played per draw at the plan's stake."""
+    stake, payouts = plan["stake"], plan["payouts"]
+    total = sum(counts)
+
+    staked = stake * total
+    won = sum(count * payouts[h] for h, count in enumerate(counts))
+    net = won - staked
+
+    logger.info("Theoretical payout (1 ticket of %s numbers per draw, stake %s):", plan["size"], _money(stake))
+    for h, count in enumerate(counts):
+        if payouts[h]:
+            logger.info("  x%-2d: %6d draws x %s = +%s", h, count, _money(payouts[h]), _money(count * payouts[h]))
+    logger.info(
+        "  staked -%s, won +%s  ->  net %s%s over %s draws",
+        _money(staked),
+        _money(won),
+        "+" if net >= 0 else "-",
+        _money(abs(net)),
+        total,
+    )
+
+
 def predict_game_results(  # noqa: PLR0913
     game_type: GameType,
     target: list[str] | None = None,
@@ -333,11 +397,14 @@ def predict_game_results(  # noqa: PLR0913
     bets_size: int | None = None,
     approaches: int = DEFAULT_APPROACHES,
     seed: int = 42,
+    *,
+    histogram: bool = False,
 ) -> None:
     """Predict the next draw: top-n probabilities, MC-dropout groups, and bets.
 
     Bets walk ALL k predicted numbers (probability order) in consecutive chunks, then
-    continue with the next-best rank combinations — see :func:`generate_bets`.
+    continue with the next-best rank combinations — see :func:`generate_bets`. With
+    ``histogram=True`` a hit-count distribution is logged below the bets.
     """
     game_config = get_game_config(game_type)
     n, k = game_config["n"], game_config["k"]
@@ -374,3 +441,6 @@ def predict_game_results(  # noqa: PLR0913
     logger.info("Bets (%s x %s numbers from the top %s predicted):", len(bets), min(size, len(pool)), len(pool))
     for i, bet in enumerate(bets, start=1):
         logger.info("  bet %2d: %s", i, bet)
+
+    if histogram:
+        log_hit_distribution(game_type)
