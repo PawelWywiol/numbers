@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 from processing.config import GameType, game_file, get_game_config, get_logger
 from processing.train import (
+    DEFAULT_HIDDEN_DIMS,
+    DEFAULT_WEIGHT_DECAY,
     MLP,
     load_data,
     load_model,
@@ -136,7 +138,7 @@ def _train_subset(  # noqa: PLR0913
     """Train a fresh classifier in-memory on ``(x, y)`` for walk-forward backtesting."""
     model = MLP(x.shape[1], hidden_dims, y.shape[1])
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=DEFAULT_WEIGHT_DECAY)
     loader = DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=True)
 
     model.train()
@@ -190,7 +192,7 @@ def evaluate_game(  # noqa: PLR0913
     """
     config = get_game_config(game_type)
     n, k = config["n"], config["k"]
-    hidden_dims = hidden_dims or [256, 128]
+    hidden_dims = hidden_dims or list(DEFAULT_HIDDEN_DIMS)
     set_seed(seed)
 
     x, y = preprocess_data(load_data(game_file(game_type, "duckdb")))

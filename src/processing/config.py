@@ -44,7 +44,7 @@ class GameType(Enum):
 
 
 class BetsConfig(TypedDict):
-    """Bet generation: ``count`` bets of ``size`` numbers sampled from the top prediction group."""
+    """Bet generation: ``count`` deterministic bets of ``size`` numbers from the full probability ranking."""
 
     count: int
     size: int
@@ -79,7 +79,7 @@ def _validate_bets(name: str, cfg: GameConfig) -> None:
     """Validate the ``bets`` section of a game config."""
     bets = cfg.get("bets")
     if not bets:
-        msg = f"games.json game '{name}' is missing the 'bets' section ({{count, size[, pool]}})"
+        msg = f"games.json game '{name}' is missing the 'bets' section ({{count, size}})"
         raise ValueError(msg)
 
     count, size = bets.get("count", 0), bets.get("size", 0)
