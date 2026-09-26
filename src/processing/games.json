@@ -4,7 +4,7 @@
         "n": 6,
         "k": 49,
         "bets": { "count": 8, "size": 6 },
-        "prizes": [{ "size": 6, "stake": 2.4, "payouts": [0, 0, 0, 24, 36, 0, 2000000] }]
+        "prizes": [{ "size": 6, "stake": 3, "payouts": [0, 0, 0, 24, 36, 0, 2000000] }]
     },
     "MultiMulti": {
         "prefix": "MultiMulti",
@@ -12,8 +12,8 @@
         "k": 80,
         "bets": { "count": 8, "size": 10 },
         "prizes": [
-            { "size": 5, "stake": 2, "payouts": [0, 0, 0, 4, 8, 700] },
-            { "size": 10, "stake": 2, "payouts": [0, 0, 0, 0, 2, 4, 12, 140, 520, 10000, 250000] }
+            { "size": 5, "stake": 2.5, "payouts": [0, 0, 0, 4, 20, 700] },
+            { "size": 10, "stake": 2.5, "payouts": [0, 0, 0, 0, 2, 4, 12, 140, 520, 10000, 250000] }
         ]
     },
     "Szybkie600": {
