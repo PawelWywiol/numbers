@@ -110,8 +110,9 @@ Each game type has specific parameters defined in `src/processing/games.json`:
 - **prizes** (optional): a list of plans, each `{size, stake, payouts}` — bet `size` numbers (the top-`size`
   predictions) at `stake`, `payouts[h]` won at `h` hits (length `size+1`). When present, `--histogram`
   adds one hit-histogram + theoretical profit/loss per plan. MultiMulti has two plans (bet-5 and bet-10);
-  Szybkie600/Lotto one. Amounts come from each game's official prize table (base stake, without bonus
-  options). Lotto's higher tiers are pari-mutuel (variable); its payouts use the regulamin's guaranteed
+  Szybkie600/Lotto one. Amounts come from each game's official prize table (without bonus options);
+  `stake` is the real price of one bet: the base stake plus the mandatory 25% surcharge
+  (MultiMulti 2.00 → 2.50 zł, Szybkie600 1.60 → 2.00 zł, Lotto 2.40 → 3.00 zł). Lotto's higher tiers are pari-mutuel (variable); its payouts use the regulamin's guaranteed
   minimums (3→24 zł fixed, 4→36 zł min, 6→2 000 000 zł min pool), so the result is a lower-bound estimate.
 - **bets**: `{count, size}` — generate `count` deterministic bets of `size` numbers from the full
   k-number ranking in probability order: bet 1 = the `size` best numbers, bet 2 = the next `size`, ...
