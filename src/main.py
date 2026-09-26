@@ -28,21 +28,28 @@ def _add_train_args(parser: argparse.ArgumentParser) -> None:
         default=10,
         help="Early-stopping patience in epochs; 0 disables it (train all epochs, save final weights).",
     )
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=42, help="Seed for training and MC-dropout passes.")
     parser.add_argument(
         "--weight-decay",
         type=float,
         default=None,
         help="L2 regularization for Adam (default: 1e-4, calibrated so val loss stays flat).",
     )
+
+
+def _add_predict_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--target", type=str, help="Comma-separated numbers to score hits against.")
+    parser.add_argument(
+        "--approaches",
+        type=int,
+        default=DEFAULT_APPROACHES,
+        help="MC-dropout forward passes for the grouped prediction view.",
+    )
     parser.add_argument(
         "--histogram",
         action="store_true",
-        help="Append a hit-count distribution (top-n vs every actual draw) after predicting.",
+        help="Append a hit-count distribution (top-n vs every actual draw) below the bets.",
     )
-
-
-def _add_bet_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bets-count", type=int, help="Override the number of bets from games.json.")
     parser.add_argument("--bets-size", type=int, help="Override the bet size from games.json.")
 
@@ -55,46 +62,34 @@ def build_parser() -> argparse.ArgumentParser:
     _add_game_arg(parser)
     parser.add_argument("--update", action="store_true", help="Legacy: load JSON + preprocess + train.")
     parser.add_argument("--train", action="store_true", help="Legacy: train then predict.")
-    parser.add_argument("--target", type=str, help="Legacy: comma-separated numbers to score hits against.")
+    _add_train_args(parser)
+    _add_predict_args(parser)
 
     sub = parser.add_subparsers(dest="command")
 
     p_update = sub.add_parser("update", help="Load JSON, rebuild features, then train and predict.")
     _add_game_arg(p_update)
     _add_train_args(p_update)
+    _add_predict_args(p_update)
 
     p_train = sub.add_parser("train", help="Train the model, then predict.")
     _add_game_arg(p_train)
     _add_train_args(p_train)
+    _add_predict_args(p_train)
 
     p_predict = sub.add_parser("predict", help="Predict the next draw and generate bets.")
     _add_game_arg(p_predict)
-    p_predict.add_argument("--target", type=str, help="Comma-separated numbers to score hits against.")
     p_predict.add_argument("--seed", type=int, default=42, help="Seed for MC-dropout passes.")
-    p_predict.add_argument(
-        "--approaches",
-        type=int,
-        default=DEFAULT_APPROACHES,
-        help="MC-dropout forward passes for the grouped prediction view.",
-    )
-    p_predict.add_argument(
-        "--histogram",
-        action="store_true",
-        help="Append a hit-count distribution (top-n vs every actual draw) below the bets.",
-    )
-    _add_bet_args(p_predict)
+    _add_predict_args(p_predict)
 
     p_eval = sub.add_parser("evaluate", help="Backtest prediction quality vs random and frequency baselines.")
     _add_game_arg(p_eval)
     p_eval.add_argument("--last-n", type=int, default=20)
     p_eval.add_argument("--retrain", action="store_true", help="True walk-forward: retrain per draw (slow, honest).")
+    p_eval.add_argument("--epochs", type=int, default=30, help="Epochs per walk-forward retrain.")
     p_eval.add_argument("--seed", type=int, default=42)
 
     return parser
-
-
-def _split_target(target: str | None) -> list[str] | None:
-    return target.split(",") if target else None
 
 
 def _parse_hidden_dims(value: str) -> list[int]:
@@ -114,6 +109,23 @@ def _train(game_type: GameType, args: argparse.Namespace) -> None:
     )
 
 
+def _load(game_type: GameType) -> None:
+    game.resolve_results(game_type)
+    game.preprocess_results(game_type)
+
+
+def _predict(game_type: GameType, args: argparse.Namespace) -> None:
+    game.predict_game_results(
+        game_type,
+        args.target.split(",") if args.target else None,
+        bets_count=args.bets_count,
+        bets_size=args.bets_size,
+        approaches=args.approaches,
+        seed=args.seed,
+        histogram=args.histogram,
+    )
+
+
 def main() -> None:
     """Parse arguments and dispatch to the requested command."""
     configure_logging()
@@ -124,41 +136,16 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    if args.command == "update":
-        game.resolve_results(game_type)
-        game.preprocess_results(game_type)
-        _train(game_type, args)
-        game.predict_game_results(game_type, histogram=args.histogram)
-        return
-
-    if args.command == "train":
-        _train(game_type, args)
-        game.predict_game_results(game_type, histogram=args.histogram)
-        return
-
-    if args.command == "predict":
-        game.predict_game_results(
-            game_type,
-            _split_target(args.target),
-            bets_count=args.bets_count,
-            bets_size=args.bets_size,
-            approaches=args.approaches,
-            seed=args.seed,
-            histogram=args.histogram,
-        )
-        return
-
     if args.command == "evaluate":
-        evaluate_game(game_type, last_n=args.last_n, retrain=args.retrain, seed=args.seed)
+        evaluate_game(game_type, last_n=args.last_n, retrain=args.retrain, epochs=args.epochs, seed=args.seed)
         return
 
-    # Legacy / default path (no subcommand).
-    if args.update:
-        game.resolve_results(game_type)
-        game.preprocess_results(game_type)
-    if args.train or args.update:
-        game.train_game_results(game_type)
-    game.predict_game_results(game_type, _split_target(args.target))
+    # "command" is None on the legacy flag path (--update / --train).
+    if args.command == "update" or args.update:
+        _load(game_type)
+    if args.command in ("update", "train") or args.train or args.update:
+        _train(game_type, args)
+    _predict(game_type, args)
 
 
 if __name__ == "__main__":

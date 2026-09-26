@@ -49,16 +49,17 @@ uv run src/main.py train --game MultiMulti --epochs 100 --lr 0.001 --hidden-dims
 # Train to the end: --patience 0 disables early stopping (all epochs run, final weights saved)
 uv run src/main.py train --game MultiMulti --epochs 100 --patience 0
 
-# --histogram works on train/update too (appended after the post-training prediction)
-uv run src/main.py train --game Szybkie600 --epochs 70 --patience 0 --histogram
+# train/update accept every predict option (--target, --approaches, --bets-*, --histogram)
+uv run src/main.py train --game Szybkie600 --epochs 70 --patience 0 --histogram --bets-count 5
 
 # Backtest vs random + frequency baselines (static = fast, in-sample sanity check)
 uv run src/main.py evaluate --game MultiMulti --last-n 50
 # Honest walk-forward backtest: retrains a fresh model per draw (slow)
-uv run src/main.py evaluate --game MultiMulti --last-n 50 --retrain
+uv run src/main.py evaluate --game MultiMulti --last-n 50 --retrain --epochs 30
 ```
 
-Legacy flag-style invocation is still supported for backward compatibility:
+Legacy flag-style invocation is still supported for backward compatibility (accepts the same
+training and predict options as `train`):
 
 ```bash
 uv run src/main.py --game MultiMulti --train
