@@ -9,6 +9,10 @@ number in the pool, trained on **leak-free** features (features for draw *i* are
 draws before *i*). Evaluation reports honest baselines (uniform random, frequency) and an exact
 binomial significance test — for a fair lottery, expect lift ≈ 1.0x and p-value > 0.05.
 
+## Player Guide (Polish)
+
+Plain-language findings for players — game comparison, odds, tested strategies, myths: [docs/README.md](docs/README.md).
+
 ## Environment Setup
 
 The project uses uv for Python package management:
